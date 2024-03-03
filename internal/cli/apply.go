@@ -44,7 +44,7 @@ func NewCmdApply() *cobra.Command {
 			if len(args) > 0 {
 				return fmt.Errorf("unexpected arguments: %v (did you forget to quote wildcards?)", args)
 			}
-			return RunApply(o.Filenames, o.Recursive, o.DryRun)
+			return RunApply(cmd.Context(), o.Filenames, o.Recursive, o.DryRun)
 		},
 		SilenceUsage: true,
 	}
@@ -67,7 +67,7 @@ func NewCmdApply() *cobra.Command {
 
 type genericResource map[string]interface{}
 
-func applyFromReader(client *apiclient.ClientWithResponses, filename string, r io.Reader, dryRun bool) []error {
+func applyFromReader(ctx context.Context, client *apiclient.ClientWithResponses, filename string, r io.Reader, dryRun bool) []error {
 	decoder := yamlutil.NewYAMLOrJSONDecoder(r, 100)
 	resources := []genericResource{}
 
@@ -117,33 +117,33 @@ func applyFromReader(client *apiclient.ClientWithResponses, filename string, r i
 		switch strings.ToLower(kind) {
 		case DeviceKind:
 			var response *apiclient.ReplaceDeviceResponse
-			response, err = client.ReplaceDeviceWithBodyWithResponse(context.Background(), resourceName, "application/json", bytes.NewReader(buf))
+			response, err = client.ReplaceDeviceWithBodyWithResponse(ctx, resourceName, "application/json", bytes.NewReader(buf))
 			if response != nil {
 				httpResponse = response.HTTPResponse
 			}
 
 		case EnrollmentRequestKind:
 			var response *apiclient.ReplaceEnrollmentRequestResponse
-			response, err = client.ReplaceEnrollmentRequestWithBodyWithResponse(context.Background(), resourceName, "application/json", bytes.NewReader(buf))
+			response, err = client.ReplaceEnrollmentRequestWithBodyWithResponse(ctx, resourceName, "application/json", bytes.NewReader(buf))
 			if response != nil {
 				httpResponse = response.HTTPResponse
 			}
 
 		case FleetKind:
 			var response *apiclient.ReplaceFleetResponse
-			response, err = client.ReplaceFleetWithBodyWithResponse(context.Background(), resourceName, "application/json", bytes.NewReader(buf))
+			response, err = client.ReplaceFleetWithBodyWithResponse(ctx, resourceName, "application/json", bytes.NewReader(buf))
 			if response != nil {
 				httpResponse = response.HTTPResponse
 			}
 		case RepositoryKind:
 			var response *apiclient.ReplaceRepositoryResponse
-			response, err = client.ReplaceRepositoryWithBodyWithResponse(context.Background(), resourceName, "application/json", bytes.NewReader(buf))
+			response, err = client.ReplaceRepositoryWithBodyWithResponse(ctx, resourceName, "application/json", bytes.NewReader(buf))
 			if response != nil {
 				httpResponse = response.HTTPResponse
 			}
 		case ResourceSyncKind:
 			var response *apiclient.ReplaceResourceSyncResponse
-			response, err = client.ReplaceResourceSyncWithBodyWithResponse(context.Background(), resourceName, "application/json", bytes.NewReader(buf))
+			response, err = client.ReplaceResourceSyncWithBodyWithResponse(ctx, resourceName, "application/json", bytes.NewReader(buf))
 			if response != nil {
 				httpResponse = response.HTTPResponse
 			}
@@ -167,7 +167,7 @@ func applyFromReader(client *apiclient.ClientWithResponses, filename string, r i
 	return errs
 }
 
-func RunApply(filenames []string, recursive bool, dryRun bool) error {
+func RunApply(ctx context.Context, filenames []string, recursive bool, dryRun bool) error {
 	client, err := client.NewFromConfigFile(defaultClientConfigFile)
 	if err != nil {
 		return fmt.Errorf("creating client: %v", err)
@@ -177,7 +177,7 @@ func RunApply(filenames []string, recursive bool, dryRun bool) error {
 	for _, filename := range filenames {
 		switch {
 		case filename == "-":
-			errs = append(errs, applyFromReader(client, "<stdin>", os.Stdin, dryRun)...)
+			errs = append(errs, applyFromReader(ctx, client, "<stdin>", os.Stdin, dryRun)...)
 		default:
 			expandedFilenames, err := expandIfFilePattern(filename)
 			if err != nil {
@@ -215,7 +215,7 @@ func RunApply(filenames []string, recursive bool, dryRun bool) error {
 						return nil
 					}
 					defer r.Close()
-					errs = append(errs, applyFromReader(client, path, r, dryRun)...)
+					errs = append(errs, applyFromReader(ctx, client, path, r, dryRun)...)
 					return nil
 				})
 				if err != nil {

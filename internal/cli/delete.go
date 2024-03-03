@@ -18,14 +18,14 @@ func NewCmdDelete() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return RunDelete(kind, name)
+			return RunDelete(cmd.Context(), kind, name)
 		},
 		SilenceUsage: true,
 	}
 	return cmd
 }
 
-func RunDelete(kind, name string) error {
+func RunDelete(ctx context.Context, kind, name string) error {
 	c, err := client.NewFromConfigFile(defaultClientConfigFile)
 	if err != nil {
 		return fmt.Errorf("creating client: %v", err)
@@ -34,13 +34,13 @@ func RunDelete(kind, name string) error {
 	switch kind {
 	case DeviceKind:
 		if len(name) > 0 {
-			response, err := c.DeleteDeviceWithResponse(context.Background(), name)
+			response, err := c.DeleteDeviceWithResponse(ctx, name)
 			if err != nil {
 				return fmt.Errorf("deleting %s/%s: %v", kind, name, err)
 			}
 			fmt.Printf("%s\n", response.Status())
 		} else {
-			response, err := c.DeleteDevicesWithResponse(context.Background())
+			response, err := c.DeleteDevicesWithResponse(ctx)
 			if err != nil {
 				return fmt.Errorf("deleting %s: %v", plural(kind), err)
 			}
@@ -48,13 +48,13 @@ func RunDelete(kind, name string) error {
 		}
 	case EnrollmentRequestKind:
 		if len(name) > 0 {
-			response, err := c.DeleteEnrollmentRequestWithResponse(context.Background(), name)
+			response, err := c.DeleteEnrollmentRequestWithResponse(ctx, name)
 			if err != nil {
 				return fmt.Errorf("deleting %s/%s: %v", kind, name, err)
 			}
 			fmt.Printf("%s\n", response.Status())
 		} else {
-			response, err := c.DeleteEnrollmentRequestsWithResponse(context.Background())
+			response, err := c.DeleteEnrollmentRequestsWithResponse(ctx)
 			if err != nil {
 				return fmt.Errorf("deleting %s: %v", plural(kind), err)
 			}
@@ -62,13 +62,13 @@ func RunDelete(kind, name string) error {
 		}
 	case FleetKind:
 		if len(name) > 0 {
-			response, err := c.DeleteFleetWithResponse(context.Background(), name)
+			response, err := c.DeleteFleetWithResponse(ctx, name)
 			if err != nil {
 				return fmt.Errorf("deleting %s/%s: %v", kind, name, err)
 			}
 			fmt.Printf("%s\n", response.Status())
 		} else {
-			response, err := c.DeleteFleetsWithResponse(context.Background())
+			response, err := c.DeleteFleetsWithResponse(ctx)
 			if err != nil {
 				return fmt.Errorf("deleting %s: %v", plural(kind), err)
 			}
@@ -76,13 +76,13 @@ func RunDelete(kind, name string) error {
 		}
 	case RepositoryKind:
 		if len(name) > 0 {
-			response, err := c.DeleteRepositoryWithResponse(context.Background(), name)
+			response, err := c.DeleteRepositoryWithResponse(ctx, name)
 			if err != nil {
 				return fmt.Errorf("deleting %s/%s: %v", kind, name, err)
 			}
 			fmt.Printf("%s\n", response.Status())
 		} else {
-			response, err := c.DeleteRepositoriesWithResponse(context.Background())
+			response, err := c.DeleteRepositoriesWithResponse(ctx)
 			if err != nil {
 				return fmt.Errorf("deleting %s: %v", plural(kind), err)
 			}
@@ -90,13 +90,13 @@ func RunDelete(kind, name string) error {
 		}
 	case ResourceSyncKind:
 		if len(name) > 0 {
-			response, err := c.DeleteResourceSyncWithResponse(context.Background(), name)
+			response, err := c.DeleteResourceSyncWithResponse(ctx, name)
 			if err != nil {
 				return fmt.Errorf("deleting %s/%s: %v", kind, name, err)
 			}
 			fmt.Printf("%s\n", response.Status())
 		} else {
-			response, err := c.DeleteResourceSyncsWithResponse(context.Background())
+			response, err := c.DeleteResourceSyncsWithResponse(ctx)
 			if err != nil {
 				return fmt.Errorf("deleting %s: %v", plural(kind), err)
 			}

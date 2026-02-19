@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +22,11 @@ import (
 	"github.com/samber/lo"
 	"github.com/sirupsen/logrus"
 	k8sAuthenticationV1 "k8s.io/api/authentication/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+)
+
+const (
+	serviceAccountTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 )
 
 // OpenShiftAuth implements OpenShift OAuth authentication using TokenReview validation
@@ -206,9 +214,15 @@ func (o *OpenShiftAuth) GetIdentity(ctx context.Context, token string) (common.I
 	}).Debug("Extracted projects for user")
 
 	// Get roles per project
+	userOpenShiftGroups, err := o.getOpenShiftGroupsForUser(ctx, username)
+	if err != nil {
+		o.log.WithError(err).Warn("Failed to get OpenShift groups for user")
+		userOpenShiftGroups = []string{}
+	}
+
 	orgRoles := make(map[string][]string)
 	for _, project := range projects {
-		roles, err := o.getRolesForUserInProject(ctx, project, username)
+		roles, err := o.getRolesForUserInProject(ctx, project, username, userOpenShiftGroups)
 		if err != nil {
 			o.log.WithError(err).WithField("project", project).Warn("Failed to get roles for project")
 			continue
@@ -342,11 +356,140 @@ func (o *OpenShiftAuth) getProjectsForUser(ctx context.Context, token string) ([
 }
 
 // getRolesForUserInProject gets roles from RoleBindings in a project
-func (o *OpenShiftAuth) getRolesForUserInProject(ctx context.Context, project, username string) ([]string, error) {
-	roles, err := o.k8sClient.ListRoleBindingsForUser(ctx, project, username)
+func (o *OpenShiftAuth) getRolesForUserInProject(ctx context.Context, project, username string, userGroups []string) ([]string, error) {
+	roleBindings, err := o.k8sClient.ListRoleBindings(ctx, project)
 	if err != nil {
 		return nil, err
 	}
-	// Normalize role names by stripping release suffix if present
-	return normalizeRoleNames(roles, o.spec.RoleSuffix), nil
+
+	groupSet := make(map[string]struct{}, len(userGroups))
+	for _, group := range userGroups {
+		groupSet[group] = struct{}{}
+	}
+
+	roles := make([]string, 0)
+	for _, binding := range roleBindings.Items {
+		if roleBindingMatchesSubject(binding, username, groupSet) {
+			roles = append(roles, binding.RoleRef.Name)
+		}
+	}
+
+	// Normalize role names by stripping release suffix if present.
+	normalizedRoles := normalizeRoleNames(roles, o.spec.RoleSuffix)
+	return uniqueStrings(normalizedRoles), nil
+}
+
+func roleBindingMatchesSubject(binding rbacv1.RoleBinding, username string, groupSet map[string]struct{}) bool {
+	for _, subject := range binding.Subjects {
+		switch subject.Kind {
+		case "User":
+			if subject.Name == username {
+				return true
+			}
+		case "Group":
+			if _, ok := groupSet[subject.Name]; ok {
+				return true
+			}
+		case "ServiceAccount":
+			namespace := subject.Namespace
+			if namespace == "" {
+				namespace = binding.Namespace
+			}
+			if fmt.Sprintf("system:serviceaccount:%s:%s", namespace, subject.Name) == username {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func (o *OpenShiftAuth) getOpenShiftGroupsForUser(ctx context.Context, username string) ([]string, error) {
+	saToken, err := getServiceAccountToken()
+	if err != nil {
+		return nil, err
+	}
+	return o.getOpenShiftGroupsForUserWithToken(ctx, username, saToken)
+}
+
+func (o *OpenShiftAuth) getOpenShiftGroupsForUserWithToken(ctx context.Context, username, bearerToken string) ([]string, error) {
+	baseURL := strings.TrimSuffix(*o.spec.ClusterControlPlaneUrl, "/")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/apis/user.openshift.io/v1/groups", nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating OpenShift user groups request: %w", err)
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", bearerToken))
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: o.tlsConfig,
+		},
+		Timeout: 10 * time.Second,
+	}
+
+	res, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("requesting OpenShift user groups: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("OpenShift user groups request failed with status: %s", res.Status)
+	}
+
+	var groupList struct {
+		Items []struct {
+			Metadata struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
+			Users []string `json:"users"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&groupList); err != nil {
+		return nil, fmt.Errorf("decoding OpenShift user groups response: %w", err)
+	}
+
+	groups := make([]string, 0)
+	for _, group := range groupList.Items {
+		for _, member := range group.Users {
+			if member == username && group.Metadata.Name != "" {
+				groups = append(groups, group.Metadata.Name)
+				break
+			}
+		}
+	}
+
+	return uniqueStrings(groups), nil
+}
+
+func getServiceAccountToken() (string, error) {
+	rawToken, err := os.ReadFile(serviceAccountTokenPath)
+	if err != nil {
+		return "", fmt.Errorf("reading service account token from %s: %w", serviceAccountTokenPath, err)
+	}
+
+	token := strings.TrimSpace(string(rawToken))
+	if token == "" {
+		return "", fmt.Errorf("service account token is empty in %s", serviceAccountTokenPath)
+	}
+
+	return token, nil
+}
+
+func uniqueStrings(items []string) []string {
+	if len(items) <= 1 {
+		return items
+	}
+
+	seen := make(map[string]struct{}, len(items))
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	sort.Strings(out)
+	return out
 }

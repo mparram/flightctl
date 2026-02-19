@@ -12,3 +12,8 @@ rules:
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
     verbs: ["get", "list"]
+  {{- if eq (include "flightctl.getEffectiveAuthType" .) "openshift" }}
+  - apiGroups: ["user.openshift.io"]
+    resources: ["groups"]
+    verbs: ["get", "list"]
+  {{- end }}
